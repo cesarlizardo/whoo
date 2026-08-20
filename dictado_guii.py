@@ -5,6 +5,15 @@ import time
 import threading
 from datetime import datetime
 
+# Ocultar el icono de cohete de Python en el Dock de macOS
+if sys.platform == "darwin":
+    try:
+        import AppKit
+        # NSApplicationActivationPolicyAccessory = 1 (mantiene la ventana pero oculta el icono del Dock)
+        AppKit.NSApplication.sharedApplication().setActivationPolicy_(1)
+    except Exception:
+        pass
+
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -80,7 +89,7 @@ class AppWhoo(ctk.CTk):
                 '<ctrl>+<alt>+d': lambda: self.after(0, self.alternar_dictado),
                 '<ctrl>+<alt>+q': lambda: self.after(0, self.salir_programa)
             })
-            self.hotkeys_listener.start()  # No bloqueante (.start() en vez de .join())
+            self.hotkeys_listener.start()
         except Exception as e:
             print(f"[!] No se pudieron activar atajos globales: {e}")
 
