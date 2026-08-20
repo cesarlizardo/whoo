@@ -57,7 +57,7 @@ class AppWhoo(ctk.CTk):
         self.lbl_titulo = ctk.CTkLabel(self, text="WHOO", font=("Helvetica", 22, "bold"))
         self.lbl_titulo.pack(pady=(20, 5))
 
-        self.lbl_estado = ctk.CTkLabel(self, text="⚙ Cargando modelo...", font=("Helvetica", 13), text_color="#ffc107")
+        self.lbl_estado = ctk.CTkLabel(self, text="⚙ Cargando modelo preciso...", font=("Helvetica", 13), text_color="#ffc107")
         self.lbl_estado.pack(pady=10)
 
         self.btn_grabar = ctk.CTkButton(
@@ -94,7 +94,8 @@ class AppWhoo(ctk.CTk):
 
     def cargar_modelo(self):
         try:
-            self.modelo = whisper.load_model("tiny")
+            # Modelo "small": Balance óptimo entre velocidad y alta precisión en español
+            self.modelo = whisper.load_model("small")
             self.after(0, lambda: self.lbl_estado.configure(text="En espera...", text_color="gray"))
             self.after(0, lambda: self.btn_grabar.configure(text="Iniciar Grabación", fg_color="#28a745", state="normal"))
         except Exception as e:
@@ -151,12 +152,23 @@ class AppWhoo(ctk.CTk):
 
             audio_data = np.concatenate(self.frames, axis=0).flatten().astype(np.float32)
 
-            # Validar duracion minima (al menos 0.5s de audio / 8000 muestras)
             if len(audio_data) < 8000:
                 self.after(0, lambda: self.lbl_estado.configure(text="⚠ Grabación muy corta", text_color="#ffc107"))
                 return
 
-            resultado = self.modelo.transcribe(audio_data, language="es", fp16=False)
+            # Normalizar audio para amplificar voces suaves antes de la transcripción
+            max_val = np.max(np.abs(audio_data))
+            if max_val > 0:
+                audio_data = audio_data / max_val
+
+            # Parámetros optimizados para evitar inventar palabras y mejorar puntuación
+            resultado = self.modelo.transcribe(
+                audio_data,
+                language="es",
+                fp16=False,
+                temperature=0.0,
+                initial_prompt="Transcripción limpia en español con correcta acentuación y puntuación."
+            )
             texto = resultado["text"].strip()
 
             if texto:
