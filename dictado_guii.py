@@ -3,16 +3,8 @@ import sys
 import ssl
 import time
 import threading
+import traceback
 from datetime import datetime
-
-# Ocultar el icono de cohete de Python en el Dock de macOS
-if sys.platform == "darwin":
-    try:
-        import AppKit
-        # NSApplicationActivationPolicyAccessory = 1 (mantiene la ventana pero oculta el icono del Dock)
-        AppKit.NSApplication.sharedApplication().setActivationPolicy_(1)
-    except Exception:
-        pass
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -41,6 +33,13 @@ CARPETA_DESTINO = os.path.expanduser("~/Desktop/Whoo")
 class AppWhoo(ctk.CTk):
     def __init__(self):
         super().__init__()
+
+        if sys.platform == "darwin":
+            try:
+                import AppKit
+                AppKit.NSApplication.sharedApplication().setActivationPolicy_(1)
+            except Exception:
+                pass
 
         self.title("Whoo")
         self.geometry("360x280")
@@ -99,6 +98,7 @@ class AppWhoo(ctk.CTk):
             self.after(0, lambda: self.lbl_estado.configure(text="En espera...", text_color="gray"))
             self.after(0, lambda: self.btn_grabar.configure(text="Iniciar Grabación", fg_color="#28a745", state="normal"))
         except Exception as e:
+            traceback.print_exc()
             self.registrar_error("Error cargando modelo", e)
 
     def callback_audio(self, indata, frames_count, time_info, status):
@@ -131,6 +131,7 @@ class AppWhoo(ctk.CTk):
             self.lbl_estado.configure(text="🎤 Grabando...", text_color="#dc3545")
             self.btn_grabar.configure(text="Detener y Transcribir", fg_color="#dc3545", hover_color="#c82333")
         except Exception as e:
+            traceback.print_exc()
             self.registrar_error("Error de Micrófono", e)
 
     def detener_y_transcribir(self):
@@ -148,7 +149,13 @@ class AppWhoo(ctk.CTk):
                 self.after(0, lambda: self.lbl_estado.configure(text="En espera...", text_color="gray"))
                 return
 
-            audio_data = np.concatenate(self.frames, axis=0).flatten()
+            audio_data = np.concatenate(self.frames, axis=0).flatten().astype(np.float32)
+
+            # Validar duracion minima (al menos 0.5s de audio / 8000 muestras)
+            if len(audio_data) < 8000:
+                self.after(0, lambda: self.lbl_estado.configure(text="⚠ Grabación muy corta", text_color="#ffc107"))
+                return
+
             resultado = self.modelo.transcribe(audio_data, language="es", fp16=False)
             texto = resultado["text"].strip()
 
@@ -162,6 +169,7 @@ class AppWhoo(ctk.CTk):
                 self.after(0, lambda: self.lbl_estado.configure(text="⚠ Sin texto detectado", text_color="#ffc107"))
 
         except Exception as e:
+            traceback.print_exc()
             self.registrar_error("Error transcripción", e)
 
         finally:
