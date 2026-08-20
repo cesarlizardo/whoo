@@ -1,0 +1,10 @@
+__pycache__/
+build/
+dist/
+DMG_Folder/
+*.spec
+*.wav
+*.dmg
+*.app
+.DS_Store
+venv/
