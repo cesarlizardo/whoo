@@ -5,6 +5,7 @@ import time
 import threading
 import traceback
 from datetime import datetime
+from PIL import Image
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -29,21 +30,17 @@ ctk.set_default_color_theme("blue")
 
 FRECUENCIA_MUESTREO = 16000
 CARPETA_DESTINO = os.path.expanduser("~/Desktop/Whoo")
+RUTA_BASE = os.path.dirname(os.path.abspath(__file__))
 
 class AppWhoo(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        if sys.platform == "darwin":
-            try:
-                import AppKit
-                AppKit.NSApplication.sharedApplication().setActivationPolicy_(1)
-            except Exception:
-                pass
-
         self.title("Whoo")
-        self.geometry("360x280")
+        self.geometry("360x450")
         self.resizable(False, False)
+
+        self.establecer_icono_dock()
 
         self.grabando = False
         self.frames = []
@@ -51,36 +48,115 @@ class AppWhoo(ctk.CTk):
         self.inicio_grabacion = 0
         self.modelo = None
         self.hotkeys_listener = None
+        self.device_mapping = {}
 
         os.makedirs(CARPETA_DESTINO, exist_ok=True)
 
-        self.lbl_titulo = ctk.CTkLabel(self, text="WHOO", font=("Helvetica", 22, "bold"))
-        self.lbl_titulo.pack(pady=(20, 5))
+        # Logo del Buho
+        ruta_logo = os.path.join(RUTA_BASE, "logo.png")
+        if os.path.exists(ruta_logo):
+            img_buho = Image.open(ruta_logo)
+            self.logo_img = ctk.CTkImage(light_image=img_buho, dark_image=img_buho, size=(100, 100))
+            self.lbl_logo = ctk.CTkLabel(self, image=self.logo_img, text="")
+            self.lbl_logo.pack(pady=(15, 2))
 
-        self.lbl_estado = ctk.CTkLabel(self, text="⚙ Cargando modelo preciso...", font=("Helvetica", 13), text_color="#ffc107")
-        self.lbl_estado.pack(pady=10)
+        self.lbl_titulo = ctk.CTkLabel(self, text="WHOO", font=("Helvetica", 20, "bold"))
+        self.lbl_titulo.pack(pady=(0, 2))
+
+        # Seleccion de Microfono
+        self.lbl_mic = ctk.CTkLabel(self, text="ENTRADA DE AUDIO", font=("Helvetica", 10, "bold"), text_color="#888888")
+        self.lbl_mic.pack(pady=(5, 2))
+
+        self.combo_mic = ctk.CTkOptionMenu(
+            self,
+            values=["Cargando micrófonos..."],
+            font=("Helvetica", 11),
+            dropdown_font=("Helvetica", 11),
+            fg_color="#2b2b2b",
+            button_color="#3d3d3d",
+            button_hover_color="#4d4d4d",
+            width=280,
+            height=28
+        )
+        self.combo_mic.pack(pady=(0, 10))
+
+        self.lbl_estado = ctk.CTkLabel(self, text="CARGANDO MODELO...", font=("Helvetica", 11, "bold"), text_color="#aaaaaa")
+        self.lbl_estado.pack(pady=5)
 
         self.btn_grabar = ctk.CTkButton(
             self, 
-            text="Cargando...", 
-            fg_color="#6c757d", 
-            font=("Helvetica", 14, "bold"),
-            height=40,
+            text="CARGANDO", 
+            fg_color="#333333", 
+            hover_color="#444444",
+            text_color="#ffffff",
+            font=("Helvetica", 12, "bold"),
+            height=38,
+            corner_radius=6,
             state="disabled",
             command=self.alternar_dictado
         )
-        self.btn_grabar.pack(pady=15)
+        self.btn_grabar.pack(pady=10)
 
         self.lbl_info = ctk.CTkLabel(
             self, 
             text="Atajos: Ctrl+Alt+D (Grabar) | Ctrl+Alt+Q (Salir)", 
-            font=("Helvetica", 11), 
-            text_color="gray"
+            font=("Helvetica", 10), 
+            text_color="#666666"
         )
-        self.lbl_info.pack(side="bottom", pady=15)
+        self.lbl_info.pack(side="bottom", pady=12)
 
+        self.obtener_dispositivos_audio()
         self.iniciar_hotkeys()
         threading.Thread(target=self.cargar_modelo, daemon=True).start()
+
+    def obtener_dispositivos_audio(self):
+        try:
+            dispositivos = sd.query_devices()
+            default_in = sd.default.device[0]
+            
+            nombres_mic = []
+            self.device_mapping = {}
+            default_name = None
+
+            for idx, dev in enumerate(dispositivos):
+                if dev['max_input_channels'] > 0:
+                    nombre = f"{dev['name']}"
+                    if list(dispositivos).count(dev) > 1 or any(nombre in k for k in self.device_mapping.keys()):
+                        display_name = f"{nombre} [{idx}]"
+                    else:
+                        display_name = nombre
+                    
+                    nombres_mic.append(display_name)
+                    self.device_mapping[display_name] = idx
+
+                    if idx == default_in:
+                        default_name = display_name
+
+            if nombres_mic:
+                self.combo_mic.configure(values=nombres_mic)
+                if default_name and default_name in nombres_mic:
+                    self.combo_mic.set(default_name)
+                else:
+                    self.combo_mic.set(nombres_mic[0])
+            else:
+                self.combo_mic.configure(values=["Sin micrófonos"])
+                self.combo_mic.set("Sin micrófonos")
+        except Exception as e:
+            traceback.print_exc()
+            self.combo_mic.configure(values=["Error al listar mics"])
+            self.combo_mic.set("Error al listar mics")
+
+    def establecer_icono_dock(self):
+        if sys.platform == "darwin":
+            try:
+                import AppKit
+                from Cocoa import NSImage
+                ruta_logo = os.path.join(RUTA_BASE, "logo.png")
+                if os.path.exists(ruta_logo):
+                    ns_img = NSImage.alloc().initWithContentsOfFile_(ruta_logo)
+                    AppKit.NSApplication.sharedApplication().setApplicationIconImage_(ns_img)
+            except Exception:
+                pass
 
     def iniciar_hotkeys(self):
         try:
@@ -89,18 +165,17 @@ class AppWhoo(ctk.CTk):
                 '<ctrl>+<alt>+q': lambda: self.after(0, self.salir_programa)
             })
             self.hotkeys_listener.start()
-        except Exception as e:
-            print(f"[!] No se pudieron activar atajos globales: {e}")
+        except Exception:
+            pass
 
     def cargar_modelo(self):
         try:
-            # Modelo "small": Balance óptimo entre velocidad y alta precisión en español
-            self.modelo = whisper.load_model("small")
-            self.after(0, lambda: self.lbl_estado.configure(text="En espera...", text_color="gray"))
-            self.after(0, lambda: self.btn_grabar.configure(text="Iniciar Grabación", fg_color="#28a745", state="normal"))
+            self.modelo = whisper.load_model("base")
+            self.after(0, lambda: self.lbl_estado.configure(text="EN ESPERA", text_color="#aaaaaa"))
+            self.after(0, lambda: self.btn_grabar.configure(text="INICIAR GRABACION", fg_color="#1b5e20", hover_color="#2e7d32", state="normal"))
         except Exception as e:
             traceback.print_exc()
-            self.registrar_error("Error cargando modelo", e)
+            self.registrar_error("ERROR AL CARGAR MODELO", e)
 
     def callback_audio(self, indata, frames_count, time_info, status):
         if self.grabando:
@@ -120,54 +195,70 @@ class AppWhoo(ctk.CTk):
         self.frames = []
         self.inicio_grabacion = time.time()
 
+        selected_mic = self.combo_mic.get()
+        device_idx = self.device_mapping.get(selected_mic, None)
+
         try:
             self.stream = sd.InputStream(
                 samplerate=FRECUENCIA_MUESTREO,
                 channels=1,
                 dtype='float32',
+                device=device_idx,
                 callback=self.callback_audio
             )
             self.stream.start()
 
-            self.lbl_estado.configure(text="🎤 Grabando...", text_color="#dc3545")
-            self.btn_grabar.configure(text="Detener y Transcribir", fg_color="#dc3545", hover_color="#c82333")
+            self.combo_mic.configure(state="disabled")
+            self.lbl_estado.configure(text="GRABANDO...", text_color="#d32f2f")
+            self.btn_grabar.configure(text="DETENER Y TRANSCRIBIR", fg_color="#b71c1c", hover_color="#c62828")
         except Exception as e:
             traceback.print_exc()
-            self.registrar_error("Error de Micrófono", e)
+            self.grabando = False
+            self.combo_mic.configure(state="normal")
+            self.registrar_error("ERROR DE MICROFONO", e)
 
     def detener_y_transcribir(self):
         duracion = time.time() - self.inicio_grabacion
         self.grabando = False
         if self.stream:
-            self.stream.stop()
-            self.stream.close()
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except Exception:
+                pass
 
-        self.after(0, lambda: self.lbl_estado.configure(text="⚙ Transcribiendo...", text_color="#ffc107"))
-        self.after(0, lambda: self.btn_grabar.configure(state="disabled"))
+        self.after(0, lambda: self.combo_mic.configure(state="normal"))
+        self.after(0, lambda: self.lbl_estado.configure(text="TRANSCRIBIENDO...", text_color="#f57c00"))
+        self.after(0, lambda: self.btn_grabar.configure(state="disabled", fg_color="#333333"))
 
         try:
             if not self.frames:
-                self.after(0, lambda: self.lbl_estado.configure(text="En espera...", text_color="gray"))
+                self.after(0, lambda: self.lbl_estado.configure(text="EN ESPERA", text_color="#aaaaaa"))
                 return
 
             audio_data = np.concatenate(self.frames, axis=0).flatten().astype(np.float32)
 
             if len(audio_data) < 8000:
-                self.after(0, lambda: self.lbl_estado.configure(text="⚠ Grabación muy corta", text_color="#ffc107"))
+                self.after(0, lambda: self.lbl_estado.configure(text="GRABACION MUY CORTA", text_color="#f57c00"))
                 return
 
-            # Normalizar audio para amplificar voces suaves antes de la transcripción
             max_val = np.max(np.abs(audio_data))
             if max_val > 0:
-                audio_data = audio_data / max_val
+                audio_data = (audio_data / max_val) * 0.95
 
-            # Parámetros optimizados para evitar inventar palabras y mejorar puntuación
             resultado = self.modelo.transcribe(
                 audio_data,
                 language="es",
                 fp16=False,
                 temperature=0.0,
-                initial_prompt="Transcripción limpia en español con correcta acentuación y puntuación."
+                beam_size=5,
+                best_of=5,
+                patience=1.0,
+                condition_on_previous_text=False,
+                initial_prompt="Transcripción exacta, limpia y fluida en español, respetando la puntuación, ortografía, mayúsculas y números.",
+                compression_ratio_threshold=2.4,
+                logprob_threshold=-1.0,
+                no_speech_threshold=0.6
             )
             texto = resultado["text"].strip()
 
@@ -176,22 +267,22 @@ class AppWhoo(ctk.CTk):
                 ruta = os.path.join(CARPETA_DESTINO, f"whoo_{fecha_hora}.txt")
                 with open(ruta, "w", encoding="utf-8") as f:
                     f.write(texto)
-                self.after(0, lambda: self.lbl_estado.configure(text=f"✔ Guardado ({int(duracion)}s)", text_color="#28a745"))
+                self.after(0, lambda: self.lbl_estado.configure(text=f"GUARDADO ({int(duracion)}s)", text_color="#388e3c"))
             else:
-                self.after(0, lambda: self.lbl_estado.configure(text="⚠ Sin texto detectado", text_color="#ffc107"))
+                self.after(0, lambda: self.lbl_estado.configure(text="SIN TEXTO DETECTADO", text_color="#f57c00"))
 
         except Exception as e:
             traceback.print_exc()
-            self.registrar_error("Error transcripción", e)
+            self.registrar_error("ERROR DE TRANSCRIPCION", e)
 
         finally:
-            self.after(0, lambda: self.btn_grabar.configure(state="normal", text="Iniciar Grabación", fg_color="#28a745"))
+            self.after(0, lambda: self.btn_grabar.configure(state="normal", text="INICIAR GRABACION", fg_color="#1b5e20", hover_color="#2e7d32"))
 
     def registrar_error(self, mensaje_ui, error):
         log_path = os.path.join(CARPETA_DESTINO, "error_log.txt")
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"[{datetime.now()}] {mensaje_ui}: {str(error)}\n")
-        self.after(0, lambda: self.lbl_estado.configure(text=f"❌ {mensaje_ui}", text_color="#dc3545"))
+        self.after(0, lambda: self.lbl_estado.configure(text=mensaje_ui, text_color="#d32f2f"))
 
     def salir_programa(self):
         if self.hotkeys_listener:
