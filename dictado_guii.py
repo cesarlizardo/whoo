@@ -11,7 +11,6 @@ import traceback
 from datetime import datetime
 from PIL import Image
 
-# Optimización de hilos para evitar bloqueos y bucles en ejecutable
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -30,14 +29,12 @@ import numpy as np
 import whisper
 from pynput import keyboard
 
-# Estilo visual de la interfaz
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 FRECUENCIA_MUESTREO = 16000
 CARPETA_DESTINO = os.path.expanduser("~/Desktop/Whoo")
 
-# Detección de ruta para recursos embebidos (PyInstaller)
 if getattr(sys, 'frozen', False):
     RUTA_BASE = sys._MEIPASS
 else:
@@ -51,12 +48,10 @@ class AppWhoo(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        # Ventana principal
         self.title("Whoo")
         self.geometry("360x450")
         self.resizable(False, False)
 
-        # Variables de estado
         self.grabando = False
         self.frames = []
         self.stream = None
@@ -67,7 +62,6 @@ class AppWhoo(ctk.CTk):
 
         os.makedirs(CARPETA_DESTINO, exist_ok=True)
 
-        # Componentes Visuales
         ruta_logo = os.path.join(RUTA_BASE, "logo.png")
         if os.path.exists(ruta_logo):
             img_buho = Image.open(ruta_logo)
@@ -81,7 +75,6 @@ class AppWhoo(ctk.CTk):
         self.lbl_mic = ctk.CTkLabel(self, text="ENTRADA DE AUDIO", font=("Helvetica", 10, "bold"), text_color="#888888")
         self.lbl_mic.pack(pady=(5, 2))
 
-        # Selector de micrófono
         self.combo_mic = ctk.CTkOptionMenu(
             self,
             values=["Cargando micrófonos..."],
@@ -95,7 +88,6 @@ class AppWhoo(ctk.CTk):
         )
         self.combo_mic.pack(pady=(0, 10))
 
-        # Indicadores de estado
         self.lbl_estado = ctk.CTkLabel(self, text="CARGANDO MODELO...", font=("Helvetica", 11, "bold"), text_color="#aaaaaa")
         self.lbl_estado.pack(pady=5)
 
@@ -121,7 +113,6 @@ class AppWhoo(ctk.CTk):
         )
         self.lbl_info.pack(side="bottom", pady=12)
 
-        # Inicialización de servicios en segundo plano
         self.obtener_dispositivos_audio()
         self.iniciar_hotkeys()
         threading.Thread(target=self.cargar_modelo, daemon=True).start()
@@ -213,17 +204,20 @@ class AppWhoo(ctk.CTk):
     def detener_y_transcribir(self):
         duracion = time.time() - self.inicio_grabacion
         self.grabando = False
-        
-        if self.stream:
-            try:
-                self.stream.stop()
-                self.stream.close()
-            except Exception:
-                pass
 
+        # Actualizar UI inmediatamente para responder al clic sin congelar
         self.after(0, lambda: self.combo_mic.configure(state="normal"))
         self.after(0, lambda: self.lbl_estado.configure(text="TRANSCRIBIENDO...", text_color="#f57c00"))
         self.after(0, lambda: self.btn_grabar.configure(state="disabled", fg_color="#333333"))
+
+        # Liberar audio de forma limpia e inmediata
+        if self.stream:
+            try:
+                self.stream.abort()
+                self.stream.close()
+            except Exception:
+                pass
+            self.stream = None
 
         try:
             if not self.frames:
