@@ -1,12 +1,17 @@
+# ==============================================================================
+# 1. CONFIGURACIÓN DEL ENTORNO E IMPORTACIONES
+# ==============================================================================
 import os
 import sys
 import ssl
 import time
 import threading
+import multiprocessing
 import traceback
 from datetime import datetime
 from PIL import Image
 
+# Optimización de hilos para evitar bloqueos y bucles en ejecutable
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -25,23 +30,33 @@ import numpy as np
 import whisper
 from pynput import keyboard
 
+# Estilo visual de la interfaz
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 FRECUENCIA_MUESTREO = 16000
 CARPETA_DESTINO = os.path.expanduser("~/Desktop/Whoo")
-RUTA_BASE = os.path.dirname(os.path.abspath(__file__))
 
+# Detección de ruta para recursos embebidos (PyInstaller)
+if getattr(sys, 'frozen', False):
+    RUTA_BASE = sys._MEIPASS
+else:
+    RUTA_BASE = os.path.dirname(os.path.abspath(__file__))
+
+
+# ==============================================================================
+# 2. CLASE PRINCIPAL E INTERFAZ GRÁFICA (GUI)
+# ==============================================================================
 class AppWhoo(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        # Ventana principal
         self.title("Whoo")
         self.geometry("360x450")
         self.resizable(False, False)
 
-        self.establecer_icono_dock()
-
+        # Variables de estado
         self.grabando = False
         self.frames = []
         self.stream = None
@@ -52,7 +67,7 @@ class AppWhoo(ctk.CTk):
 
         os.makedirs(CARPETA_DESTINO, exist_ok=True)
 
-        # Logo del Buho
+        # Componentes Visuales
         ruta_logo = os.path.join(RUTA_BASE, "logo.png")
         if os.path.exists(ruta_logo):
             img_buho = Image.open(ruta_logo)
@@ -63,10 +78,10 @@ class AppWhoo(ctk.CTk):
         self.lbl_titulo = ctk.CTkLabel(self, text="WHOO", font=("Helvetica", 20, "bold"))
         self.lbl_titulo.pack(pady=(0, 2))
 
-        # Seleccion de Microfono
         self.lbl_mic = ctk.CTkLabel(self, text="ENTRADA DE AUDIO", font=("Helvetica", 10, "bold"), text_color="#888888")
         self.lbl_mic.pack(pady=(5, 2))
 
+        # Selector de micrófono
         self.combo_mic = ctk.CTkOptionMenu(
             self,
             values=["Cargando micrófonos..."],
@@ -80,6 +95,7 @@ class AppWhoo(ctk.CTk):
         )
         self.combo_mic.pack(pady=(0, 10))
 
+        # Indicadores de estado
         self.lbl_estado = ctk.CTkLabel(self, text="CARGANDO MODELO...", font=("Helvetica", 11, "bold"), text_color="#aaaaaa")
         self.lbl_estado.pack(pady=5)
 
@@ -105,10 +121,15 @@ class AppWhoo(ctk.CTk):
         )
         self.lbl_info.pack(side="bottom", pady=12)
 
+        # Inicialización de servicios en segundo plano
         self.obtener_dispositivos_audio()
         self.iniciar_hotkeys()
         threading.Thread(target=self.cargar_modelo, daemon=True).start()
 
+
+# ==============================================================================
+# 3. CAPTURA Y SELECCIÓN DE AUDIO
+# ==============================================================================
     def obtener_dispositivos_audio(self):
         try:
             dispositivos = sd.query_devices()
@@ -121,10 +142,7 @@ class AppWhoo(ctk.CTk):
             for idx, dev in enumerate(dispositivos):
                 if dev['max_input_channels'] > 0:
                     nombre = f"{dev['name']}"
-                    if list(dispositivos).count(dev) > 1 or any(nombre in k for k in self.device_mapping.keys()):
-                        display_name = f"{nombre} [{idx}]"
-                    else:
-                        display_name = nombre
+                    display_name = f"{nombre} [{idx}]" if list(dispositivos).count(dev) > 1 else nombre
                     
                     nombres_mic.append(display_name)
                     self.device_mapping[display_name] = idx
@@ -134,61 +152,17 @@ class AppWhoo(ctk.CTk):
 
             if nombres_mic:
                 self.combo_mic.configure(values=nombres_mic)
-                if default_name and default_name in nombres_mic:
-                    self.combo_mic.set(default_name)
-                else:
-                    self.combo_mic.set(nombres_mic[0])
+                self.combo_mic.set(default_name if default_name in nombres_mic else nombres_mic[0])
             else:
                 self.combo_mic.configure(values=["Sin micrófonos"])
                 self.combo_mic.set("Sin micrófonos")
-        except Exception as e:
-            traceback.print_exc()
+        except Exception:
             self.combo_mic.configure(values=["Error al listar mics"])
             self.combo_mic.set("Error al listar mics")
-
-    def establecer_icono_dock(self):
-        if sys.platform == "darwin":
-            try:
-                import AppKit
-                from Cocoa import NSImage
-                ruta_logo = os.path.join(RUTA_BASE, "logo.png")
-                if os.path.exists(ruta_logo):
-                    ns_img = NSImage.alloc().initWithContentsOfFile_(ruta_logo)
-                    AppKit.NSApplication.sharedApplication().setApplicationIconImage_(ns_img)
-            except Exception:
-                pass
-
-    def iniciar_hotkeys(self):
-        try:
-            self.hotkeys_listener = keyboard.GlobalHotKeys({
-                '<ctrl>+<alt>+d': lambda: self.after(0, self.alternar_dictado),
-                '<ctrl>+<alt>+q': lambda: self.after(0, self.salir_programa)
-            })
-            self.hotkeys_listener.start()
-        except Exception:
-            pass
-
-    def cargar_modelo(self):
-        try:
-            self.modelo = whisper.load_model("base")
-            self.after(0, lambda: self.lbl_estado.configure(text="EN ESPERA", text_color="#aaaaaa"))
-            self.after(0, lambda: self.btn_grabar.configure(text="INICIAR GRABACION", fg_color="#1b5e20", hover_color="#2e7d32", state="normal"))
-        except Exception as e:
-            traceback.print_exc()
-            self.registrar_error("ERROR AL CARGAR MODELO", e)
 
     def callback_audio(self, indata, frames_count, time_info, status):
         if self.grabando:
             self.frames.append(indata.copy())
-
-    def alternar_dictado(self):
-        if self.modelo is None:
-            return
-            
-        if not self.grabando:
-            self.iniciar_grabacion()
-        else:
-            threading.Thread(target=self.detener_y_transcribir, daemon=True).start()
 
     def iniciar_grabacion(self):
         self.grabando = True
@@ -212,14 +186,34 @@ class AppWhoo(ctk.CTk):
             self.lbl_estado.configure(text="GRABANDO...", text_color="#d32f2f")
             self.btn_grabar.configure(text="DETENER Y TRANSCRIBIR", fg_color="#b71c1c", hover_color="#c62828")
         except Exception as e:
-            traceback.print_exc()
             self.grabando = False
             self.combo_mic.configure(state="normal")
             self.registrar_error("ERROR DE MICROFONO", e)
 
+
+# ==============================================================================
+# 4. MOTOR DE TRANSCRIPCIÓN (WHISPER AI)
+# ==============================================================================
+    def cargar_modelo(self):
+        try:
+            self.modelo = whisper.load_model("base")
+            self.after(0, lambda: self.lbl_estado.configure(text="EN ESPERA", text_color="#aaaaaa"))
+            self.after(0, lambda: self.btn_grabar.configure(text="INICIAR GRABACION", fg_color="#1b5e20", hover_color="#2e7d32", state="normal"))
+        except Exception as e:
+            self.registrar_error("ERROR AL CARGAR MODELO", e)
+
+    def alternar_dictado(self):
+        if self.modelo is None:
+            return
+        if not self.grabando:
+            self.iniciar_grabacion()
+        else:
+            threading.Thread(target=self.detener_y_transcribir, daemon=True).start()
+
     def detener_y_transcribir(self):
         duracion = time.time() - self.inicio_grabacion
         self.grabando = False
+        
         if self.stream:
             try:
                 self.stream.stop()
@@ -251,14 +245,8 @@ class AppWhoo(ctk.CTk):
                 language="es",
                 fp16=False,
                 temperature=0.0,
-                beam_size=5,
-                best_of=5,
-                patience=1.0,
                 condition_on_previous_text=False,
-                initial_prompt="Transcripción exacta, limpia y fluida en español, respetando la puntuación, ortografía, mayúsculas y números.",
-                compression_ratio_threshold=2.4,
-                logprob_threshold=-1.0,
-                no_speech_threshold=0.6
+                initial_prompt="Dictado en español."
             )
             texto = resultado["text"].strip()
 
@@ -272,16 +260,31 @@ class AppWhoo(ctk.CTk):
                 self.after(0, lambda: self.lbl_estado.configure(text="SIN TEXTO DETECTADO", text_color="#f57c00"))
 
         except Exception as e:
-            traceback.print_exc()
             self.registrar_error("ERROR DE TRANSCRIPCION", e)
 
         finally:
             self.after(0, lambda: self.btn_grabar.configure(state="normal", text="INICIAR GRABACION", fg_color="#1b5e20", hover_color="#2e7d32"))
 
+
+# ==============================================================================
+# 5. ATAJOS DE TECLADO Y MANEJO DE ERRORES
+# ==============================================================================
+    def iniciar_hotkeys(self):
+        def _start_listener():
+            try:
+                self.hotkeys_listener = keyboard.GlobalHotKeys({
+                    '<ctrl>+<alt>+d': lambda: self.after(0, self.alternar_dictado),
+                    '<ctrl>+<alt>+q': lambda: self.after(0, self.salir_programa)
+                })
+                self.hotkeys_listener.start()
+            except Exception:
+                pass
+        threading.Thread(target=_start_listener, daemon=True).start()
+
     def registrar_error(self, mensaje_ui, error):
         log_path = os.path.join(CARPETA_DESTINO, "error_log.txt")
         with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"[{datetime.now()}] {mensaje_ui}: {str(error)}\n")
+            f.write(f"[{datetime.now()}] {mensaje_ui}: {str(error)}\n{traceback.format_exc()}\n")
         self.after(0, lambda: self.lbl_estado.configure(text=mensaje_ui, text_color="#d32f2f"))
 
     def salir_programa(self):
@@ -293,6 +296,11 @@ class AppWhoo(ctk.CTk):
         self.destroy()
         os._exit(0)
 
+
+# ==============================================================================
+# 6. PUNTO DE ENTRADA DE LA APLICACIÓN
+# ==============================================================================
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     app = AppWhoo()
     app.mainloop()
