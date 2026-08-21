@@ -11,12 +11,14 @@ import traceback
 from datetime import datetime
 from PIL import Image
 
+# Prevenir bloqueos de C++ y hilos paralelos en PyTorch / PyInstaller
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -187,7 +189,7 @@ class AppWhoo(ctk.CTk):
 # ==============================================================================
     def cargar_modelo(self):
         try:
-            self.modelo = whisper.load_model("base")
+            self.modelo = whisper.load_model("base", device="cpu")
             self.after(0, lambda: self.lbl_estado.configure(text="EN ESPERA", text_color="#aaaaaa"))
             self.after(0, lambda: self.btn_grabar.configure(text="INICIAR GRABACION", fg_color="#1b5e20", hover_color="#2e7d32", state="normal"))
         except Exception as e:
@@ -205,15 +207,13 @@ class AppWhoo(ctk.CTk):
         duracion = time.time() - self.inicio_grabacion
         self.grabando = False
 
-        # Actualizar UI inmediatamente para responder al clic sin congelar
         self.after(0, lambda: self.combo_mic.configure(state="normal"))
         self.after(0, lambda: self.lbl_estado.configure(text="TRANSCRIBIENDO...", text_color="#f57c00"))
         self.after(0, lambda: self.btn_grabar.configure(state="disabled", fg_color="#333333"))
 
-        # Liberar audio de forma limpia e inmediata
         if self.stream:
             try:
-                self.stream.abort()
+                self.stream.stop()
                 self.stream.close()
             except Exception:
                 pass
@@ -234,14 +234,17 @@ class AppWhoo(ctk.CTk):
             if max_val > 0:
                 audio_data = (audio_data / max_val) * 0.95
 
-            resultado = self.modelo.transcribe(
-                audio_data,
-                language="es",
-                fp16=False,
-                temperature=0.0,
-                condition_on_previous_text=False,
-                initial_prompt="Dictado en español."
-            )
+            # Inferencia aislada sin bloqueo de hilos PyTorch
+            torch.set_num_threads(1)
+            with torch.inference_mode():
+                resultado = self.modelo.transcribe(
+                    audio_data,
+                    language="es",
+                    fp16=False,
+                    temperature=0.0,
+                    condition_on_previous_text=False,
+                    initial_prompt="Dictado en español."
+                )
             texto = resultado["text"].strip()
 
             if texto:
